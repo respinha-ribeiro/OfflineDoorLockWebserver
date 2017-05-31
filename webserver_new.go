@@ -29,6 +29,10 @@ type UserReq struct {
 	Lockalias string
 }
 
+type User struct {
+	User string
+}
+
 type LockKeyDates struct {
 	Lock  string
 	Keys  []string
@@ -211,7 +215,7 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 
 	decoder := json.NewDecoder(r.Body)
 
-	req := UserReq{}
+	req := User{}
 	err := decoder.Decode(&req)
 	if err != nil {
 		panic(err)
@@ -219,6 +223,7 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 
 	username := req.User
 
+	fmt.Println("User ", username)
 	// todo: remove this function?
 	keysMap := rfid_db.GetUpdatedKeys(conn, username)
 
@@ -231,7 +236,7 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 		keys := keysMap[k].Keys
 
 		jsonElem[i] = LockKeyDates{k, keys, dates}
-		i += 1
+		i++
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -45,7 +45,7 @@ func InitConn() *sql.DB {
 
 	// hardcoded for testing purposes
 
-	hash := sha256.New()
+	/*hash := sha256.New()
 
 	passBytes := []byte("password")
 	hash.Write(passBytes)
@@ -63,7 +63,7 @@ func InitConn() *sql.DB {
 	// InsertAdmin(conn, "John Admin", password, "lock 1")
 	AssignLockToUser(conn, "John Doe", "lock 1", true)
 	AssignLockToUser(conn, "Peter Doe", "lock 1", false)
-	AssignLockToUser(conn, "John Doe", "lock 2", false)
+	AssignLockToUser(conn, "John Doe", "lock 2", false)*/
 
 	// InsertUserLock(conn, userid, lockid, "Client")
 
