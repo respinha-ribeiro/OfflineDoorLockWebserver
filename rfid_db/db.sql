@@ -8,8 +8,8 @@ CREATE TABLE  Users  (
 CREATE TABLE Locks (
 	id integer NOT NULL PRIMARY KEY AUTOINCREMENT,
 	lockalias text,
-	masterkey text,
-	adminkey text
+	masterkey text not null,
+	adminkey text not null
 );
 
 CREATE TABLE UserTypes (

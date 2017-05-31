@@ -15,9 +15,10 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-type ClientKeys struct {
-	Date string
-	Key  string
+type UserKeys struct {
+	Admin bool
+	Date  string
+	Key   string
 }
 
 type UserReq struct {
@@ -127,6 +128,8 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 	duration := req.Duration
 	lockalias := req.Lockalias
 
+	fmt.Println("Requested for ", start, "with", duration)
+
 	dates, keys, userHash := rfid_db.ComputeKeys(conn, start, username, lockalias, duration)
 
 	if dates == nil {
@@ -134,12 +137,39 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonElem := make([]ClientKeys, duration)
+	size := len(keys)
 
-	for i := 0; i < len(keys); i++ {
+	jsonElem := make([]UserKeys, size)
+	roles := make([]bool, size)
+
+	if size > duration {
+
+		// twice the amount
+		// client and admin keys
+		for i := 0; i < size/2; i++ {
+			roles[i] = false
+		}
+		for i := size / 2; i < size; i++ {
+			roles[i] = true
+		}
+
+	} else {
+
+		for i := 0; i < size; i++ {
+			roles[i] = false
+		}
+
+	}
+
+	dateIdx := 0
+	for i := 0; i < size; i++ {
+
+		if dateIdx == len(dates) {
+			dateIdx = 0
+		}
 
 		base64key := base64.StdEncoding.EncodeToString(keys[i])
-		jsonElem[i] = ClientKeys{Date: dates[i], Key: base64key}
+		jsonElem[i] = UserKeys{Admin: roles[i], Date: dates[dateIdx], Key: base64key}
 
 		if err != nil {
 			panic(err)
@@ -147,6 +177,8 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 
 		str := hex.EncodeToString(keys[i])
 		fmt.Println(str)
+
+		dateIdx++
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -239,7 +271,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		masterkeys := rfid_db.GetAdminMasterKeys(conn, user)
+		masterkeys := rfid_db.GetAdminKeys(conn, user)
 
 		jsonString, err := json.Marshal(masterkeys)
 		if err != nil {
@@ -354,7 +386,19 @@ func UpdateMasterkey(w http.ResponseWriter, r *http.Request) {
 	username := r.Form.Get("User")
 	lockalias := r.Form.Get("Lock")
 
-	if !rfid_db.IsAdmin(conn, username, lockalias) {
+	/*if !rfid_db.IsAdmin(conn, username, lockalias) {
+
+
+	}*/
+
+	masterkey := rfid_db.GenerateMasterKey(conn)
+	userid := rfid_db.SearchUser(conn, username)
+	lockid := rfid_db.SearchLock(conn, lockalias)
+
+	userlockid, typeid := rfid_db.SearchUserLock(conn, userid, lockid)
+	usertype := rfid_db.SearchUserTypeByID(conn, typeid)
+
+	if usertype != "Admin" {
 
 		w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
 		w.WriteHeader(401)
@@ -362,15 +406,13 @@ func UpdateMasterkey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	masterkey := rfid_db.GenerateMasterKey(conn)
-	userid := rfid_db.SearchUser(conn, username)
-	lockid := rfid_db.SearchLock(conn, lockalias)
-	typeid := rfid_db.SearchUserType(conn, "Admin")
+	if userlockid == -1 {
 
-	userlockid := rfid_db.SearchUserLock(conn, userid, lockid, typeid)
+		w.WriteHeader(404)
+		w.Write([]byte("No user lock instance found for " + lockalias))
+	}
 
-	rfid_db.UpdateMasterkey(conn, userlockid, masterkey)
-
+	rfid_db.UpdateMasterkey(conn, lockid, masterkey)
 	// TODO: test
 }
 
@@ -397,7 +439,7 @@ func GetMasterkey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lockid := rfid_db.SearchLock(conn, lockalias)
-	_, masterkey := rfid_db.GetMasterKey(conn, lockid)
+	masterkey := rfid_db.GetMasterKey(conn, lockid)
 
 	// TODO: test
 	w.Write([]byte(masterkey))
