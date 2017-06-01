@@ -32,6 +32,7 @@ CREATE TABLE Keys (
 	key text,
 	date text,
 	userlockid integer not null,
+	admin not null,
 	foreign key(userlockid) references UserLock(id)
 );
 

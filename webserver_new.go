@@ -34,10 +34,10 @@ type User struct {
 }
 
 type LockKeyDates struct {
-	Lock  string
 	Admin bool
-	Keys  []string
-	Dates []string
+	Lock  string
+	Key   string
+	Dates string
 }
 
 var conn *sql.DB
@@ -178,16 +178,13 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 		base64key := base64.StdEncoding.EncodeToString(keys[i])
 		jsonElem[i] = UserKeys{Admin: roles[i], Date: dates[dateIdx], Key: base64key}
 
-		if err != nil {
-			panic(err)
-		}
-
 		str := hex.EncodeToString(keys[i])
 		fmt.Println(str)
 
 		dateIdx++
 	}
 
+	fmt.Println("Done!")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jsonElem)
 
@@ -228,23 +225,17 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("User ", username)
 
-	keysMap := rfid_db.GetUpdatedKeys(conn, username)
+	keys := rfid_db.GetUpdatedKeys(conn, username)
 
-	jsonElem := make([]LockKeyDates, len(keysMap))
+	// jsonElem := make([]LockKeyDates, len(keys))
 
-	i := 0
-	for k := range keysMap {
-
-		admin := keysMap[k].Admin
-		dates := keysMap[k].Dates
-		keys := keysMap[k].Keys
-
-		jsonElem[i] = LockKeyDates{k, admin, keys, dates}
-		i++
+	jsonString, err := json.Marshal(keys)
+	if err != nil {
+		panic(err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jsonElem)
+	json.NewEncoder(w).Encode(jsonString)
 
 }
 
@@ -270,6 +261,22 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	user := req.User
 
 	fmt.Println("User is", user)
+	keys := rfid_db.GetUpdatedKeys(conn, user)
+
+	/*jsonString, err := json.Marshal(keys)
+	if err != nil {
+
+		panic(err)
+	}*/
+
+	// w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(keys)
+
+	userHash := rfid_db.GetUserHash(conn, user)
+	userHashB64 := base64.StdEncoding.EncodeToString(userHash)
+	w.Write([]byte(userHashB64))
+	w.Header().Set("User hash", userHashB64)
+
 	/*masterkeys := rfid_db.GetAdminKeys(conn, user)
 
 	if masterkeys != nil && len(masterkeys) > 0 {
@@ -283,35 +290,6 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(jsonString)
 	}*/
-
-	keysMap := rfid_db.GetUpdatedKeys(conn, user)
-	jsonElem := make([]LockKeyDates, len(keysMap))
-
-	i := 0
-
-	fmt.Println("keys map len", len(keysMap))
-	for k := range keysMap {
-
-		admin := keysMap[k].Admin
-		dates := keysMap[k].Dates
-		keys := keysMap[k].Keys
-
-		for j := 0; j < len(keys); j++ {
-
-			keys[j] = base64.StdEncoding.EncodeToString([]byte(keys[j]))
-		}
-
-		jsonElem[i] = LockKeyDates{k, admin, keys, dates}
-
-		i++
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jsonElem)
-
-	userHash := rfid_db.GetUserHash(conn, user)
-	userHashB64 := base64.StdEncoding.EncodeToString(userHash)
-	w.Write([]byte(userHashB64))
 
 	/*if admin {
 

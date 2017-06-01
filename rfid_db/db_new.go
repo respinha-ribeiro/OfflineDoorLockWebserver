@@ -16,6 +16,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/hkdf"
 	//"bytes"
+	"encoding/base64"
+	"encoding/json"
 )
 
 var MASTER_KEY string
@@ -27,6 +29,13 @@ type KeysDates struct {
 	Admin bool
 	Dates []string
 	Keys  []string
+}
+
+type KeyInfo struct {
+	Admin     bool
+	Lockalias string
+	Date      string
+	Key       string
 }
 
 type AdminKeys struct {
@@ -45,7 +54,7 @@ func InitConn() *sql.DB {
 
 	// hardcoded for testing purposes
 
-	/*hash := sha256.New()
+	hash := sha256.New()
 
 	passBytes := []byte("password")
 	hash.Write(passBytes)
@@ -63,7 +72,7 @@ func InitConn() *sql.DB {
 	// InsertAdmin(conn, "John Admin", password, "lock 1")
 	AssignLockToUser(conn, "John Doe", "lock 1", true)
 	AssignLockToUser(conn, "Peter Doe", "lock 1", false)
-	AssignLockToUser(conn, "John Doe", "lock 2", false)*/
+	AssignLockToUser(conn, "John Doe", "lock 2", false)
 
 	return conn
 }
@@ -162,6 +171,9 @@ func InsertLock(conn *sql.DB, alias string) int {
 
 	masterkey := GenerateMasterKey(conn)
 	maintenancekey := GenerateMaintenanceKey(conn)
+
+	fmt.Println("Generated master", masterkey)
+	fmt.Println("Generated master", maintenancekey)
 
 	tx, err := conn.Begin()
 	CheckErr(err)
@@ -487,6 +499,7 @@ func ComputeKeys(conn *sql.DB, date string, username string, lockalias string, d
 
 	}
 
+	fmt.Println("Ck master", master)
 	lockKeys = append(lockKeys, master)
 
 	if usertype == "Admin" {
@@ -494,6 +507,7 @@ func ComputeKeys(conn *sql.DB, date string, username string, lockalias string, d
 		maintenancekey = GetMaintenanceKey(conn, userlockid)
 
 		lockKeys = append(lockKeys, maintenancekey)
+		fmt.Println("Ck maintenance", maintenancekey)
 	}
 
 	if len(lockKeys) < 1 || len(lockKeys) > 2 {
@@ -523,6 +537,8 @@ func ComputeKeys(conn *sql.DB, date string, username string, lockalias string, d
 	lockKeysLen := len(lockKeys)
 
 	initialDate := dateObj
+	keysIdx := 0
+
 	for k := 0; k < lockKeysLen; k++ {
 
 		dateIdx := 0
@@ -558,27 +574,30 @@ func ComputeKeys(conn *sql.DB, date string, username string, lockalias string, d
 			// TODO: maybe rewrite operation to obtain raw PRK,
 			// 		 retrieve when needed and then expand it
 			// hkdf := hkdf.New(hash, []byte(master), dateBytes, userHashBytes)
-			hkdf := hkdf.New(hash, []byte(lockKeys[k]), dateBytes, userHashBytes)
-			keys[i] = make([]byte, 32)
 
-			n, err := io.ReadFull(hkdf, keys[i])
+			hkdf := hkdf.New(hash, []byte(lockKeys[k]), dateBytes, userHashBytes)
+			keys[keysIdx] = make([]byte, 32)
+
+			n, err := io.ReadFull(hkdf, keys[keysIdx])
 			CheckErr(err)
 
-			if n != len(keys[i]) {
+			if n != len(keys[keysIdx]) {
 				fmt.Println("error with key length\n")
 				return nil, nil, nil
 			}
 
-			AssignKeyToUser(conn, userlockid, keys[i], dateNumbers)
+			AssignKeyToUser(conn, userlockid, keys[keysIdx], dateNumbers, k == 1)
 
 			// incrementing date
 			dateObj = dateObj.Add(time.Hour * 24)
 			dateIdx++
+			keysIdx++
 		}
 
 		dateObj = initialDate
 	}
 
+	fmt.Println("Keys calculated!")
 	return dateStrings, keys, userHashBytes
 }
 
@@ -598,20 +617,28 @@ func GetMaintenanceKey(conn *sql.DB, userlockid int) (key string) {
 	return key
 }
 
-func AssignKeyToUser(conn *sql.DB, userlockid int, key []byte, dateNumbers []int) {
+func AssignKeyToUser(conn *sql.DB, userlockid int, key []byte, dateNumbers []int, admin bool) {
 
+	fmt.Println("Debug", key)
 	tx, err := conn.Begin()
 	CheckErr(err)
 
 	fullDate := time.Date(dateNumbers[0], time.Month(dateNumbers[1]), dateNumbers[2], 0, 0, 0, 0, time.UTC).String()
 	date := strings.Fields(fullDate)[0]
 
-	stmt, err := conn.Prepare("insert into Keys(key, date, userlockid) values(?,?,?)")
+	stmt, err := conn.Prepare("insert into Keys(key, date, userlockid, admin) values(?,?,?,?)")
 	CheckErr(err)
 
 	defer stmt.Close()
 
-	_, err = tx.Stmt(stmt).Exec(key, date, userlockid)
+	var isAdmin int
+	if admin {
+		isAdmin = 1
+	} else {
+		isAdmin = 0
+	}
+
+	_, err = tx.Stmt(stmt).Exec(key, date, userlockid, isAdmin)
 	CheckErr(err)
 
 	err = tx.Commit()
@@ -652,7 +679,7 @@ func GetUserHash(conn *sql.DB, username string) []byte {
 	return userBytes
 }
 
-func GetUpdatedKeys(conn *sql.DB, username string) map[string]KeysDates {
+func GetUpdatedKeys(conn *sql.DB, username string) []string {
 
 	// setting date layout
 	dateLayout := "2006-01-02"
@@ -668,8 +695,9 @@ func GetUpdatedKeys(conn *sql.DB, username string) map[string]KeysDates {
 
 	defer rows.Close()
 
-	m := make(map[string]KeysDates)
+	// m := make(map[string]KeysDates)
 
+	var keys []string
 	for rows.Next() {
 
 		// todo: fazer isto para
@@ -677,34 +705,36 @@ func GetUpdatedKeys(conn *sql.DB, username string) map[string]KeysDates {
 		var typeid = -1
 		rows.Scan(&userlockid, &typeid)
 
-		usertype := SearchUserTypeByID(conn, typeid)
-		admin := (usertype == "Admin")
+		// usertype := SearchUserTypeByID(conn, typeid)
+		// admin := (usertype == "Admin")
 
 		fmt.Println("result", userlockid)
 
 		// todo: continue refactoring
-		results, err := conn.Query("select L.lockalias, K.date, K.key from Keys as K join UserLock as UL on UL.id=K.userlockid join Locks as L on L.id=UL.lockid where K.userlockid=?", userlockid)
+		results, err := conn.Query("select L.lockalias, K.date, K.key, K.admin from Keys as K join UserLock as UL on UL.id=K.userlockid join Locks as L on L.id=UL.lockid where K.userlockid=?", userlockid)
 		CheckErr(err)
 
 		defer results.Close()
 
 		for results.Next() {
 
+			fmt.Println("Next")
 			var date string
 			var key string
 			var lockalias string
+			var admin int
 
-			err = results.Scan(&lockalias, &date, &key)
+			err = results.Scan(&lockalias, &date, &key, &admin)
 			CheckErr(err)
 
-			lockMap, ok := m[lockalias]
+			/* lockMap, ok := m[lockalias]
 
 			if !ok {
 
-				var tmpDates []string
-				var tmpKeys []string
-				lockMap = KeysDates{Admin: admin, Dates: tmpDates, Keys: tmpKeys}
-			}
+				// var tmpDates []string
+				// var tmpKeys []string
+				lockMap = KeysDates{Admin: admin == 1, Dates: tmpDates, Keys: tmpKeys}
+			}*/
 
 			date = "2" + date[1:len(date)]
 			dateDB, err := time.Parse(dateLayout, date)
@@ -712,15 +742,27 @@ func GetUpdatedKeys(conn *sql.DB, username string) map[string]KeysDates {
 
 			if !currentDateFormated.After(dateDB) {
 
-				lockMap.Dates = append(lockMap.Dates, dateDB.String())
+				key = base64.StdEncoding.EncodeToString([]byte(key))
+				keyInfo := &KeyInfo{Admin: admin == 1, Lockalias: lockalias, Date: date, Key: key}
+
+				keyStr, err := json.Marshal(keyInfo)
+				CheckErr(err)
+				/*lockMap.Dates = append(lockMap.Dates, dateDB.String())
 				lockMap.Keys = append(lockMap.Keys, key)
 
-				m[lockalias] = lockMap
+				m[lockalias] = lockMap*/
+
+				//fmt.Println(keyInfo)
+
+				keys = append(keys, string(keyStr))
 			}
 
 		}
 
-		return m
+		for i := 0; i < len(keys); i++ {
+			fmt.Println(keys[i])
+		}
+		return keys
 	}
 
 	return nil
@@ -808,8 +850,6 @@ func GetAdminKeys(conn *sql.DB, username string) []AdminKeys {
 }
 
 func GetMasterKey(conn *sql.DB, lockid int) string {
-
-	fmt.Println("Query beggining")
 
 	fmt.Println("Lock id searching master key...", lockid)
 	rows, err := conn.Query("select masterkey from Locks where id=?", lockid)
