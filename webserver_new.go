@@ -35,6 +35,7 @@ type User struct {
 
 type LockKeyDates struct {
 	Lock  string
+	Admin bool
 	Keys  []string
 	Dates []string
 }
@@ -50,6 +51,8 @@ func main() {
 	http.HandleFunc("/login", Login)
 	http.HandleFunc("/req_keys", RequestKeys)
 	http.HandleFunc("/update_keys", GetUpdatedKeys)
+	http.HandleFunc("/update_master_key", GetMasterkey)
+
 	/*http.HandleFunc("/register_user", RegisterUser)*/
 
 	//http.HandleFunc("/submit_logs", SubmitLogs)
@@ -224,7 +227,7 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 	username := req.User
 
 	fmt.Println("User ", username)
-	// todo: remove this function?
+
 	keysMap := rfid_db.GetUpdatedKeys(conn, username)
 
 	jsonElem := make([]LockKeyDates, len(keysMap))
@@ -232,10 +235,11 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 	i := 0
 	for k := range keysMap {
 
+		admin := keysMap[k].Admin
 		dates := keysMap[k].Dates
 		keys := keysMap[k].Keys
 
-		jsonElem[i] = LockKeyDates{k, keys, dates}
+		jsonElem[i] = LockKeyDates{k, admin, keys, dates}
 		i++
 	}
 
@@ -243,6 +247,7 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(jsonElem)
 
 }
+
 func Login(w http.ResponseWriter, r *http.Request) {
 
 	if !basicAuth(w, r) {
@@ -253,30 +258,21 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.ParseForm()
-
 	decoder := json.NewDecoder(r.Body)
 
-	req := UserReq{}
+	req := User{}
 	err := decoder.Decode(&req)
 	if err != nil {
 		panic(err)
 	}
 
-	admin := req.Admin
+	// admin := req.Admin
 	user := req.User
 
-	if admin {
+	fmt.Println("User is", user)
+	/*masterkeys := rfid_db.GetAdminKeys(conn, user)
 
-		if !rfid_db.IsAdmin(conn, user, "") {
-
-			w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
-			w.WriteHeader(401)
-			w.Write([]byte("User is not an administrator\n"))
-			return
-		}
-
-		masterkeys := rfid_db.GetAdminKeys(conn, user)
+	if masterkeys != nil && len(masterkeys) > 0 {
 
 		jsonString, err := json.Marshal(masterkeys)
 		if err != nil {
@@ -286,34 +282,51 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(jsonString)
-	} else {
+	}*/
 
-		keysMap := rfid_db.GetUpdatedKeys(conn, user)
-		jsonElem := make([]LockKeyDates, len(keysMap))
+	keysMap := rfid_db.GetUpdatedKeys(conn, user)
+	jsonElem := make([]LockKeyDates, len(keysMap))
 
-		i := 0
-		// todo: marshal?
-		for k := range keysMap {
+	i := 0
 
-			dates := keysMap[k].Dates
-			keys := keysMap[k].Keys
+	fmt.Println("keys map len", len(keysMap))
+	for k := range keysMap {
 
-			for i := 0; i < len(keys); i++ {
+		admin := keysMap[k].Admin
+		dates := keysMap[k].Dates
+		keys := keysMap[k].Keys
 
-				keys[i] = base64.StdEncoding.EncodeToString([]byte(keys[i]))
-			}
+		for j := 0; j < len(keys); j++ {
 
-			jsonElem[i] = LockKeyDates{k, keys, dates}
-			i += 1
+			keys[j] = base64.StdEncoding.EncodeToString([]byte(keys[j]))
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jsonElem)
+		jsonElem[i] = LockKeyDates{k, admin, keys, dates}
 
-		userHash := rfid_db.GetUserHash(conn, user)
-		userHashB64 := base64.StdEncoding.EncodeToString(userHash)
-		w.Write([]byte(userHashB64))
+		i++
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(jsonElem)
+
+	userHash := rfid_db.GetUserHash(conn, user)
+	userHashB64 := base64.StdEncoding.EncodeToString(userHash)
+	w.Write([]byte(userHashB64))
+
+	/*if admin {
+
+		if !rfid_db.IsAdmin(conn, user, "") {
+
+			w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
+			w.WriteHeader(401)
+			w.Write([]byte("User is not an administrator\n"))
+			return
+		}
+
+	} else {
+
+
+	}*/
 
 	// todo: test
 }

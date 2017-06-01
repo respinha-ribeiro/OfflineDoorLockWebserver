@@ -2,7 +2,7 @@ package rfid_db
 
 import (
 	//"container/list"
-	"crypto/rand"
+
 	"crypto/sha1"
 	"crypto/sha256"
 	"database/sql"
@@ -64,19 +64,6 @@ func InitConn() *sql.DB {
 	AssignLockToUser(conn, "John Doe", "lock 1", true)
 	AssignLockToUser(conn, "Peter Doe", "lock 1", false)
 	AssignLockToUser(conn, "John Doe", "lock 2", false)*/
-
-	// InsertUserLock(conn, userid, lockid, "Client")
-
-	/*tx, err := conn.Begin()
-	stmt, err := conn.Prepare("insert into UserLock(userid, lockid, typeid, masterkey) values (?,?,?,?)")
-	CheckErr(err)
-
-	defer stmt.Close()
-	_, err = tx.Stmt(stmt).Exec(userid, lockid, typeid, "")
-	CheckErr(err)
-
-	err = tx.Commit()
-	CheckErr(err)*/
 
 	return conn
 }
@@ -174,7 +161,7 @@ func InsertUserLock(conn *sql.DB, userid int, lockid int, usertype string) (user
 func InsertLock(conn *sql.DB, alias string) int {
 
 	masterkey := GenerateMasterKey(conn)
-	maintenancekey := GenerateMasterKey(conn)
+	maintenancekey := GenerateMaintenanceKey(conn)
 
 	tx, err := conn.Begin()
 	CheckErr(err)
@@ -853,10 +840,18 @@ func GenerateMaintenanceKey(conn *sql.DB) string {
 
 func GenerateMasterKey(conn *sql.DB) string {
 
-	token := make([]byte, 32)
+	/*token := make([]byte, 32)
 	rand.Read(token)
 
-	return string(token)
+	fmt.Println("MASTER KEY", hex.EncodeToString(token))
+	return string(token)*/
+
+	masterkey := [32]byte{0x4c, 0xcd, 0x08, 0x9b, 0x28, 0xff, 0x96, 0xda,
+		0x9d, 0xb6, 0xc3, 0x46, 0xec, 0x11, 0x4e, 0x0f,
+		0x5b, 0x8a, 0x31, 0x9f, 0x35, 0xab, 0xa6, 0x24,
+		0xda, 0x8c, 0xf6, 0xed, 0x4f, 0xb8, 0xa6, 0xfb}
+
+	return string(masterkey[:32])
 }
 
 func CheckErr(err error) {
