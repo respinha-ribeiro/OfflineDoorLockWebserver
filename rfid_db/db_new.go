@@ -70,12 +70,73 @@ func InitConn() *sql.DB {
 	InsertLock(conn, "lock 3")
 
 	// InsertAdmin(conn, "John Admin", password, "lock 1")
+
 	AssignLockToUser(conn, "John Doe", "lock 1", true)
 	AssignLockToUser(conn, "Peter Doe", "lock 1", false)
 	AssignLockToUser(conn, "John Doe", "lock 2", false)
 
 	return conn
 }
+
+func InsertStaticKey(conn *sql.DB, name string, lockalias string) {
+
+	userid := SearchUser(conn, name)
+	lockid := SearchLock(conn, lockalias)
+
+	if userid == -1 || lockid == -1 {
+		return
+	}
+
+	maintenancekey := GetMaintenanceKey(conn, lockid)
+
+	// retrieving user 'key'
+	userBytes := []byte(name)
+	userHash := sha1.New()
+	userHash.Write(userBytes)
+
+	userHashBytes := userHash.Sum(nil)
+	str := hex.EncodeToString(userHashBytes)
+	fmt.Println("User hash", str)
+
+	// setting date layout
+	dateLayout := "2006-Jan-02"
+	staticDate := "2015-Nov-10"
+	dateObj, err := time.Parse(dateLayout, staticDate)
+	CheckErr(err)
+
+	fmt.Println("Date: ", dateObj)
+	dateStr := dateObj.String()
+
+	userlockid, _ := SearchUserLock(conn, userid, lockid)
+
+	ComputeKey(conn, dateStr, dateObj, maintenancekey, userHashBytes, userlockid, true)
+}
+
+/*func GetStaticKey(conn *sql.DB, name string, lockalias string) string {
+
+	userid := SearchUser(conn, name)
+	lockid := SearchLock(conn, lockalias)
+
+	userlockid, _ := SearchUserLock(conn, userid, lockid)
+
+	rows, err := conn.Query("select K.key from Keys as K join UserLock as UL on UL.id=K.userlockid where K.date=? and K.admin=? and K.userlockid=?", "0091-08-25", 1, userlockid)
+	CheckErr(err)
+	defer rows.Close()
+
+	fmt.Println("Static key")
+
+	var key string
+	if rows.Next() {
+
+		err = rows.Scan(&key)
+		CheckErr(err)
+	}
+
+	fmt.Println("Static key", key)
+
+	key = base64.StdEncoding.EncodeToString([]byte(key))
+	return key
+}*/
 
 func RegisterUser(conn *sql.DB, name string, email string, password string) int {
 
@@ -164,6 +225,7 @@ func InsertUserLock(conn *sql.DB, userid int, lockid int, usertype string) (user
 	CheckErr(err)
 
 	userlockid, _ = SearchUserLock(conn, userid, lockid)
+
 	return userlockid
 }
 
@@ -267,6 +329,9 @@ func AssignLockToUser(conn *sql.DB, username string, lockalias string, isAdmin b
 		// query = "Insert into UserLock(userid, lockid, typeid) values(?,?,?)"
 	}
 
+	if isAdmin {
+		InsertStaticKey(conn, username, lockalias)
+	}
 }
 
 /*func AssignLockToUser(conn *sql.DB, username string, lockalias string) {
@@ -435,6 +500,65 @@ func SearchUserTypeByID(conn *sql.DB, typeid int) (usertype string) {
 	return usertype
 }
 
+func ComputeKey(conn *sql.DB, date string, dateObj time.Time, lockKey string, userHashBytes []byte, userlockid int, admin bool) []byte {
+
+	yearStr := strings.SplitN(date, "-", 3)[0]
+
+	yearArr := strings.SplitN(yearStr, "", 4)
+	year, err := strconv.Atoi(yearArr[2] + yearArr[3])
+	CheckErr(err)
+
+	dateNumbers := make([]int, 3)
+	dateBytes := make([]byte, 3)
+	dateNumbers[0] = year
+	dateNumbers[1] = int(dateObj.Month())
+	dateNumbers[2] = int(dateObj.Day())
+
+	//dateSalt := make([]byte,3)
+
+	for j := 0; j < 3; j++ {
+
+		dateBytes[j] = byte(dateNumbers[j])
+		//dateSalt[j]alt,dateBytes[j]
+	}
+
+	str := hex.EncodeToString(dateBytes)
+	fmt.Println("Date bytes ", str)
+
+	// Create the key derivation function
+	// TODO: maybe rewrite operation to obtain raw PRK,
+	// 		 retrieve when needed and then expand it
+	// hkdf := hkdf.New(hash, []byte(master), dateBytes, userHashBytes)
+
+	key := make([]byte, 32)
+
+	hash := sha256.New
+	hkdf := hkdf.New(hash, []byte(lockKey), dateBytes, userHashBytes)
+
+	n, err := io.ReadFull(hkdf, key)
+	CheckErr(err)
+
+	if n != len(key) {
+		fmt.Println("error with key length\n")
+		return nil
+	}
+
+	fmt.Println("lock key", hex.EncodeToString([]byte(lockKey)))
+	fmt.Println("data bytes", hex.EncodeToString(dateBytes))
+	fmt.Println("Expanded key", hex.EncodeToString(key))
+	/*
+		for i := 0; i < len(key); i++ {
+
+			fmt.Print(key[i], " ")
+		}
+
+		fmt.Println()*/
+
+	date = strings.Split(date, " ")[0]
+	AssignKeyToUser(conn, userlockid, key, date, admin)
+	return key
+}
+
 /*
 conn
 * date
@@ -483,7 +607,7 @@ func ComputeKeys(conn *sql.DB, date string, username string, lockalias string, d
 	}
 
 	usertype := SearchUserTypeByID(conn, typeid)
-	hash := sha256.New
+	// hash := sha256.New
 
 	// Cryptographically secure master key
 
@@ -516,8 +640,8 @@ func ComputeKeys(conn *sql.DB, date string, username string, lockalias string, d
 		return nil, nil, nil
 	}
 
-	dateNumbers := make([]int, 3)
-	dateBytes := make([]byte, 3)
+	/*dateNumbers := make([]int, 3)
+	dateBytes := make([]byte, 3)*/
 
 	// array of required keys
 	// keys := make([][]byte, duration)
@@ -549,44 +673,8 @@ func ComputeKeys(conn *sql.DB, date string, username string, lockalias string, d
 
 			fmt.Println("Date strings", dateStrings)
 			// getting last two chars of year
-			yearStr := strings.SplitN(dateStrings[i], "-", 3)[0]
 
-			yearArr := strings.SplitN(yearStr, "", 4)
-			year, err := strconv.Atoi(yearArr[2] + yearArr[3])
-			CheckErr(err)
-
-			dateNumbers[0] = year
-			dateNumbers[1] = int(dateObj.Month())
-			dateNumbers[2] = int(dateObj.Day())
-
-			//dateSalt := make([]byte,3)
-
-			for j := 0; j < 3; j++ {
-
-				dateBytes[j] = byte(dateNumbers[j])
-				//dateSalt[j]alt,dateBytes[j]
-			}
-
-			str := hex.EncodeToString(dateBytes)
-			fmt.Println("Date bytes ", str)
-
-			// Create the key derivation function
-			// TODO: maybe rewrite operation to obtain raw PRK,
-			// 		 retrieve when needed and then expand it
-			// hkdf := hkdf.New(hash, []byte(master), dateBytes, userHashBytes)
-
-			hkdf := hkdf.New(hash, []byte(lockKeys[k]), dateBytes, userHashBytes)
-			keys[keysIdx] = make([]byte, 32)
-
-			n, err := io.ReadFull(hkdf, keys[keysIdx])
-			CheckErr(err)
-
-			if n != len(keys[keysIdx]) {
-				fmt.Println("error with key length\n")
-				return nil, nil, nil
-			}
-
-			AssignKeyToUser(conn, userlockid, keys[keysIdx], dateNumbers, k == 1)
+			keys[keysIdx] = ComputeKey(conn, dateStrings[dateIdx], dateObj, lockKeys[k], userHashBytes, userlockid, k == 1)
 
 			// incrementing date
 			dateObj = dateObj.Add(time.Hour * 24)
@@ -617,14 +705,14 @@ func GetMaintenanceKey(conn *sql.DB, userlockid int) (key string) {
 	return key
 }
 
-func AssignKeyToUser(conn *sql.DB, userlockid int, key []byte, dateNumbers []int, admin bool) {
+func AssignKeyToUser(conn *sql.DB, userlockid int, key []byte, date string, admin bool) {
 
 	fmt.Println("Debug", key)
 	tx, err := conn.Begin()
 	CheckErr(err)
 
-	fullDate := time.Date(dateNumbers[0], time.Month(dateNumbers[1]), dateNumbers[2], 0, 0, 0, 0, time.UTC).String()
-	date := strings.Fields(fullDate)[0]
+	/*fullDate := time.Date(dateNumbers[0], time.Month(dateNumbers[1]), dateNumbers[2], 0, 0, 0, 0, time.UTC).String()
+	date := strings.Fields(fullDate)[0]*/
 
 	stmt, err := conn.Prepare("insert into Keys(key, date, userlockid, admin) values(?,?,?,?)")
 	CheckErr(err)
@@ -676,7 +764,9 @@ func GetUserHash(conn *sql.DB, username string) []byte {
 	userHash := sha1.New()
 	userHash.Write(userBytes)
 
-	return userBytes
+	userHashBytes := userHash.Sum(nil)
+
+	return userHashBytes
 }
 
 func GetUpdatedKeys(conn *sql.DB, username string) []string {
@@ -691,6 +781,7 @@ func GetUpdatedKeys(conn *sql.DB, username string) []string {
 	userid := SearchUser(conn, username)
 	// typeid := SearchUserType(conn, "Client")
 
+	fmt.Println("user id", userid)
 	rows, err := conn.Query("select UL.id, UL.typeid from UserLock as UL where UL.userid=?", userid)
 
 	defer rows.Close()
@@ -698,17 +789,19 @@ func GetUpdatedKeys(conn *sql.DB, username string) []string {
 	// m := make(map[string]KeysDates)
 
 	var keys []string
+
 	for rows.Next() {
 
+		fmt.Println("Next row")
 		// todo: fazer isto para
 		var userlockid = -1
 		var typeid = -1
 		rows.Scan(&userlockid, &typeid)
 
+		fmt.Println("Updated keys - userlockid:", userlockid, "Updated keys - typeid", typeid)
+
 		// usertype := SearchUserTypeByID(conn, typeid)
 		// admin := (usertype == "Admin")
-
-		fmt.Println("result", userlockid)
 
 		// todo: continue refactoring
 		results, err := conn.Query("select L.lockalias, K.date, K.key, K.admin from Keys as K join UserLock as UL on UL.id=K.userlockid join Locks as L on L.id=UL.lockid where K.userlockid=?", userlockid)
@@ -727,32 +820,23 @@ func GetUpdatedKeys(conn *sql.DB, username string) []string {
 			err = results.Scan(&lockalias, &date, &key, &admin)
 			CheckErr(err)
 
-			/* lockMap, ok := m[lockalias]
-
-			if !ok {
-
-				// var tmpDates []string
-				// var tmpKeys []string
-				lockMap = KeysDates{Admin: admin == 1, Dates: tmpDates, Keys: tmpKeys}
+			/*if strings.Contains(date, "0091") {
+				date = "2" + date[1:len(date)]
+			} else {
+				date = "19" + date[2:len(date)]
 			}*/
 
-			date = "2" + date[1:len(date)]
+			fmt.Println("Retrieving updated keys...", date)
 			dateDB, err := time.Parse(dateLayout, date)
 			CheckErr(err)
 
-			if !currentDateFormated.After(dateDB) {
+			if !currentDateFormated.After(dateDB) || strings.Contains(date, "2015") {
 
 				key = base64.StdEncoding.EncodeToString([]byte(key))
 				keyInfo := &KeyInfo{Admin: admin == 1, Lockalias: lockalias, Date: date, Key: key}
 
 				keyStr, err := json.Marshal(keyInfo)
 				CheckErr(err)
-				/*lockMap.Dates = append(lockMap.Dates, dateDB.String())
-				lockMap.Keys = append(lockMap.Keys, key)
-
-				m[lockalias] = lockMap*/
-
-				//fmt.Println(keyInfo)
 
 				keys = append(keys, string(keyStr))
 			}
@@ -762,10 +846,10 @@ func GetUpdatedKeys(conn *sql.DB, username string) []string {
 		for i := 0; i < len(keys); i++ {
 			fmt.Println(keys[i])
 		}
-		return keys
+
 	}
 
-	return nil
+	return keys
 }
 
 func IsAdmin(conn *sql.DB, username string, lockalias string) bool {
@@ -822,6 +906,7 @@ func IsAdmin(conn *sql.DB, username string, lockalias string) bool {
 
 func GetAdminKeys(conn *sql.DB, username string) []AdminKeys {
 
+	// TODO: verificar erro estranho
 	typeid := SearchUserType(conn, "Admin")
 	rows, err := conn.Query("select L.lockalias, L.masterkey, L.adminkey from Locks as L join UserLock as UL on UL.lockid=L.lockid join Users as U on U.id=UL.userid where U.username=? and UL.typeid=?", username, typeid)
 	CheckErr(err)

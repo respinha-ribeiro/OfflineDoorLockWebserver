@@ -135,6 +135,8 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 	duration := req.Duration
 	lockalias := req.Lockalias
 
+	// staticKey := rfid_db.GetStaticKey(conn, username, lockalias)
+
 	fmt.Println("Requested for ", start, "with", duration)
 
 	dates, keys, userHash := rfid_db.ComputeKeys(conn, start, username, lockalias, duration)
@@ -184,11 +186,15 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 		dateIdx++
 	}
 
+	// static := UserKeys{Admin: true, Date: "2015-11-10", Key: staticKey}
+	// jsonElem = append(jsonElem, static)
+
 	fmt.Println("Done!")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jsonElem)
 
 	userHashB64 := base64.StdEncoding.EncodeToString(userHash)
+	fmt.Println(len([]byte(userHashB64)))
 	w.Write([]byte(userHashB64))
 }
 
@@ -274,39 +280,9 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 	userHash := rfid_db.GetUserHash(conn, user)
 	userHashB64 := base64.StdEncoding.EncodeToString(userHash)
+
+	fmt.Println(len([]byte(userHashB64)))
 	w.Write([]byte(userHashB64))
-	w.Header().Set("User hash", userHashB64)
-
-	/*masterkeys := rfid_db.GetAdminKeys(conn, user)
-
-	if masterkeys != nil && len(masterkeys) > 0 {
-
-		jsonString, err := json.Marshal(masterkeys)
-		if err != nil {
-
-			panic(err)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jsonString)
-	}*/
-
-	/*if admin {
-
-		if !rfid_db.IsAdmin(conn, user, "") {
-
-			w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
-			w.WriteHeader(401)
-			w.Write([]byte("User is not an administrator\n"))
-			return
-		}
-
-	} else {
-
-
-	}*/
-
-	// todo: test
 }
 
 func RegisterUser(w http.ResponseWriter, r *http.Request) {
