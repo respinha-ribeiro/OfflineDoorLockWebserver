@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"./rfid_db"
@@ -40,6 +41,11 @@ type LockKeyDates struct {
 	Dates string
 }
 
+type UserLock struct {
+	User string
+	Lock string
+}
+
 var conn *sql.DB
 
 func main() {
@@ -50,13 +56,11 @@ func main() {
 	http.HandleFunc("/hello", hello)
 	http.HandleFunc("/login", Login)
 	http.HandleFunc("/req_keys", RequestKeys)
-	http.HandleFunc("/update_keys", GetUpdatedKeys)
-	http.HandleFunc("/update_master_key", GetMasterkey)
+	http.HandleFunc("/update_master_key", UpdateMasterkey)
 
 	/*http.HandleFunc("/register_user", RegisterUser)*/
 
 	//http.HandleFunc("/submit_logs", SubmitLogs)
-	//http.HandleFunc("/update_masterkey", UpdateMasterkey)
 
 	fmt.Println("Listening on port 8000...")
 	// err := http.ListenAndServeTLS(":8000", "server.crt", "server.key", nil)
@@ -198,7 +202,7 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(userHashB64))
 }
 
-func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
+/*func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 
 	if !basicAuth(w, r) {
 
@@ -207,17 +211,6 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("401 Unauthorized\n"))
 		return
 	}
-
-	/* TODO: acrescentar
-	r.ParseForm()
-	provider := r.Form.Get("Provider")
-
-	if rfid_db.FindProvider(conn, provider) < 0 {
-
-		w.WriteHeader(401)
-		w.Write([]byte("401 Unauthorized; request performed by a non-provider user \n"))
-		return
-	}*/
 
 	decoder := json.NewDecoder(r.Body)
 
@@ -243,7 +236,7 @@ func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jsonString)
 
-}
+}*/
 
 func Login(w http.ResponseWriter, r *http.Request) {
 
@@ -276,12 +269,18 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}*/
 
 	// w.Header().Set("Content-Type", "application/json")
+
+	userid := rfid_db.SearchUser(conn, user)
+	w.Write([]byte(strconv.Itoa(userid)))
+	w.Write([]byte("\n"))
+
 	json.NewEncoder(w).Encode(keys)
 
 	userHash := rfid_db.GetUserHash(conn, user)
+
+	fmt.Println("USER HASH", hex.EncodeToString(userHash))
 	userHashB64 := base64.StdEncoding.EncodeToString(userHash)
 
-	fmt.Println(len([]byte(userHashB64)))
 	w.Write([]byte(userHashB64))
 }
 
@@ -354,14 +353,16 @@ func UpdateMasterkey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.ParseForm()
-	username := r.Form.Get("User")
-	lockalias := r.Form.Get("Lock")
+	decoder := json.NewDecoder(r.Body)
 
-	/*if !rfid_db.IsAdmin(conn, username, lockalias) {
+	req := UserLock{}
+	err := decoder.Decode(&req)
+	if err != nil {
+		panic(err)
+	}
 
-
-	}*/
+	username := req.User
+	lockalias := req.Lock
 
 	masterkey := rfid_db.GenerateMasterKey(conn)
 	userid := rfid_db.SearchUser(conn, username)
@@ -385,34 +386,7 @@ func UpdateMasterkey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rfid_db.UpdateMasterkey(conn, lockid, masterkey)
-	// TODO: test
-}
 
-func GetMasterkey(w http.ResponseWriter, r *http.Request) {
-
-	if !basicAuth(w, r) {
-
-		w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
-		w.WriteHeader(401)
-		w.Write([]byte("401 Unauthorized\n"))
-		return
-	}
-
-	r.ParseForm()
-	username := r.Form.Get("User")
-	lockalias := r.Form.Get("Lock")
-
-	if !rfid_db.IsAdmin(conn, username, lockalias) {
-
-		w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
-		w.WriteHeader(401)
-		w.Write([]byte("User has no admin privileges or lock doesn't exist\n"))
-		return
-	}
-
-	lockid := rfid_db.SearchLock(conn, lockalias)
-	masterkey := rfid_db.GetMasterKey(conn, lockid)
-
-	// TODO: test
+	masterkey = base64.StdEncoding.EncodeToString([]byte(masterkey))
 	w.Write([]byte(masterkey))
 }

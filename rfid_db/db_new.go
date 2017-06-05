@@ -3,7 +3,7 @@ package rfid_db
 import (
 	//"container/list"
 
-	"crypto/sha1"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -17,13 +17,19 @@ import (
 	"golang.org/x/crypto/hkdf"
 	//"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 )
 
-var MASTER_KEY string
 var INSERT_USER = "Insert into Users(username, email,password) values(?,?,?)"
 var SEARCH_USER_LOCK = "select UL.id from UserLocks as UL join Users as U on U.id=UL.userid join Locks as L on L.id=UL.lockid where U.username=? and L.lockalias=?"
 var SEARCH_USER = "select id from Users where username=?"
+
+var dailyKeySize = 32
+var maintenanceKeySize = 32
+var masterKeySize = 16
+
+var bdPath = "./rfid_db/db_new.db"
 
 type KeysDates struct {
 	Admin bool
@@ -46,14 +52,10 @@ type AdminKeys struct {
 
 func InitConn() *sql.DB {
 
-	byteArray := []byte{0x4c, 0xcd, 0x08, 0x9b, 0x28, 0xff, 0x96, 0xda, 0x9d, 0xb6, 0xc3, 0x46, 0xec, 0x11, 0x4e, 0x0f, 0x5b, 0x8a, 0x31, 0x9f, 0x35, 0xab, 0xa6, 0x24, 0xda, 0x8c, 0xf6, 0xed, 0x4f, 0xb8, 0xa6, 0xfb}
-	MASTER_KEY = string(byteArray)
-
-	conn, err := sql.Open("sqlite3", "./rfid_db/db_new.db")
+	conn, err := sql.Open("sqlite3", bdPath)
 	CheckErr(err)
 
 	// hardcoded for testing purposes
-
 	hash := sha256.New()
 
 	passBytes := []byte("password")
@@ -90,13 +92,14 @@ func InsertStaticKey(conn *sql.DB, name string, lockalias string) {
 	maintenancekey := GetMaintenanceKey(conn, lockid)
 
 	// retrieving user 'key'
-	userBytes := []byte(name)
-	userHash := sha1.New()
+
+	userBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(userBytes, uint32(userid))
+
+	userHash := sha256.New()
 	userHash.Write(userBytes)
 
 	userHashBytes := userHash.Sum(nil)
-	str := hex.EncodeToString(userHashBytes)
-	fmt.Println("User hash", str)
 
 	// setting date layout
 	dateLayout := "2006-Jan-02"
@@ -231,8 +234,14 @@ func InsertUserLock(conn *sql.DB, userid int, lockid int, usertype string) (user
 
 func InsertLock(conn *sql.DB, alias string) int {
 
-	masterkey := GenerateMasterKey(conn)
-	maintenancekey := GenerateMaintenanceKey(conn)
+	masterkey := ""
+	maintenancekey := ""
+
+	for masterkey == maintenancekey {
+
+		masterkey = GenerateMasterKey(conn)
+		maintenancekey = GenerateMaintenanceKey(conn)
+	}
 
 	fmt.Println("Generated master", masterkey)
 	fmt.Println("Generated master", maintenancekey)
@@ -402,8 +411,6 @@ func SearchLock(conn *sql.DB, lockalias string) int {
 
 func MatchPassword(conn *sql.DB, username string, password string) bool {
 
-	fmt.Println("DEBUG: ", username, password)
-
 	rows, err := conn.Query("select password from Users where username=?", username)
 
 	defer rows.Close()
@@ -525,12 +532,7 @@ func ComputeKey(conn *sql.DB, date string, dateObj time.Time, lockKey string, us
 	str := hex.EncodeToString(dateBytes)
 	fmt.Println("Date bytes ", str)
 
-	// Create the key derivation function
-	// TODO: maybe rewrite operation to obtain raw PRK,
-	// 		 retrieve when needed and then expand it
-	// hkdf := hkdf.New(hash, []byte(master), dateBytes, userHashBytes)
-
-	key := make([]byte, 32)
+	key := make([]byte, dailyKeySize)
 
 	hash := sha256.New
 	hkdf := hkdf.New(hash, []byte(lockKey), dateBytes, userHashBytes)
@@ -542,17 +544,6 @@ func ComputeKey(conn *sql.DB, date string, dateObj time.Time, lockKey string, us
 		fmt.Println("error with key length\n")
 		return nil
 	}
-
-	fmt.Println("lock key", hex.EncodeToString([]byte(lockKey)))
-	fmt.Println("data bytes", hex.EncodeToString(dateBytes))
-	fmt.Println("Expanded key", hex.EncodeToString(key))
-	/*
-		for i := 0; i < len(key); i++ {
-
-			fmt.Print(key[i], " ")
-		}
-
-		fmt.Println()*/
 
 	date = strings.Split(date, " ")[0]
 	AssignKeyToUser(conn, userlockid, key, date, admin)
@@ -650,8 +641,10 @@ func ComputeKeys(conn *sql.DB, date string, username string, lockalias string, d
 	dateStrings := make([]string, duration)
 
 	// retrieving user 'key'
-	userBytes := []byte(username)
-	userHash := sha1.New()
+	userBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(userBytes, uint32(userid))
+
+	userHash := sha256.New()
 	userHash.Write(userBytes)
 
 	userHashBytes := userHash.Sum(nil)
@@ -707,7 +700,6 @@ func GetMaintenanceKey(conn *sql.DB, userlockid int) (key string) {
 
 func AssignKeyToUser(conn *sql.DB, userlockid int, key []byte, date string, admin bool) {
 
-	fmt.Println("Debug", key)
 	tx, err := conn.Begin()
 	CheckErr(err)
 
@@ -759,13 +751,15 @@ func GetUserHash(conn *sql.DB, username string) []byte {
 		return nil
 	}
 
-	userBytes := []byte(username)
+	userBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(userBytes, uint32(userid))
 
-	userHash := sha1.New()
+	userHash := sha256.New()
 	userHash.Write(userBytes)
 
 	userHashBytes := userHash.Sum(nil)
 
+	fmt.Println("Retrieving user hash...", userHashBytes)
 	return userHashBytes
 }
 
@@ -955,28 +949,27 @@ func GetMasterKey(conn *sql.DB, lockid int) string {
 
 func GenerateMaintenanceKey(conn *sql.DB) string {
 
-	masterkey := [32]byte{0x4c, 0xcd, 0x08, 0x9b, 0x28, 0xff, 0x96, 0xda,
+	/*token := make([]byte, maintenanceKeySize)
+	rand.Read(token)
+
+	fmt.Println("Generated maintenance key", hex.EncodeToString(token))
+	return string(token)*/
+
+	key := [32]byte{0x4c, 0xcd, 0x08, 0x9b, 0x28, 0xff, 0x96, 0xda,
 		0x9d, 0xb6, 0xc3, 0x46, 0xec, 0x11, 0x4e, 0x0f,
 		0x5b, 0x8a, 0x31, 0x9f, 0x35, 0xab, 0xa6, 0x24,
 		0xda, 0x8c, 0xf6, 0xed, 0x4f, 0xb8, 0xa6, 0xfb}
 
-	return string(masterkey[:32])
+	return string(key[:maintenanceKeySize])
 }
 
 func GenerateMasterKey(conn *sql.DB) string {
 
-	/*token := make([]byte, 32)
+	token := make([]byte, masterKeySize)
 	rand.Read(token)
 
-	fmt.Println("MASTER KEY", hex.EncodeToString(token))
-	return string(token)*/
-
-	masterkey := [32]byte{0x4c, 0xcd, 0x08, 0x9b, 0x28, 0xff, 0x96, 0xda,
-		0x9d, 0xb6, 0xc3, 0x46, 0xec, 0x11, 0x4e, 0x0f,
-		0x5b, 0x8a, 0x31, 0x9f, 0x35, 0xab, 0xa6, 0x24,
-		0xda, 0x8c, 0xf6, 0xed, 0x4f, 0xb8, 0xa6, 0xfb}
-
-	return string(masterkey[:32])
+	fmt.Println("Generated master key", hex.EncodeToString(token))
+	return string(token)
 }
 
 func CheckErr(err error) {
