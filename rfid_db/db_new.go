@@ -14,6 +14,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	// _ "github.com/lib/pq"
 	"golang.org/x/crypto/hkdf"
 	//"bytes"
 	"encoding/base64"
@@ -21,7 +22,7 @@ import (
 	"encoding/json"
 )
 
-var INSERT_USER = "Insert into Users(username, email,password) values(?,?,?)"
+var INSERT_USER = "Insert into Users(username, password) values(?,?)"
 var SEARCH_USER_LOCK = "select UL.id from UserLocks as UL join Users as U on U.id=UL.userid join Locks as L on L.id=UL.lockid where U.username=? and L.lockalias=?"
 var SEARCH_USER = "select id from Users where username=?"
 
@@ -64,18 +65,24 @@ func InitConn() *sql.DB {
 	password := hex.EncodeToString(passBytes)
 	fmt.Println("Inserted password ", password)
 
-	InsertUser(conn, "John Doe", "", password)
-	InsertUser(conn, "Peter Doe", "", password)
+	InsertUser(conn, "John Doe", password)
+	InsertUser(conn, "Peter Doe", password)
 
-	InsertLock(conn, "lock 1")
-	InsertLock(conn, "lock 2")
-	InsertLock(conn, "lock 3")
+	InsertLock(conn, "Lock 1")
+	InsertLock(conn, "Lock 2")
+	InsertLock(conn, "Lock 3")
 
-	// InsertAdmin(conn, "John Admin", password, "lock 1")
+	AssignLockToUser(conn, "John Doe", "Lock 1", true)
+	AssignLockToUser(conn, "Peter Doe", "Lock 1", false)
+	AssignLockToUser(conn, "John Doe", "Lock 2", false)
+	AssignLockToUser(conn, "Peter Doe", "Lock 3", true)
+	AssignLockToUser(conn, "John Doe", "Lock 3", false)
 
-	AssignLockToUser(conn, "John Doe", "lock 1", true)
-	AssignLockToUser(conn, "Peter Doe", "lock 1", false)
-	AssignLockToUser(conn, "John Doe", "lock 2", false)
+	ComputeKeys(conn, "2017-Jun-06", "John Doe", "Lock 1", 8)
+	ComputeKeys(conn, "2017-Jun-06", "John Doe", "Lock 2", 8)
+	ComputeKeys(conn, "2017-Jun-06", "Peter Doe", "Lock 1", 8)
+	ComputeKeys(conn, "2017-Jun-06", "John Doe", "Lock 3", 8)
+	ComputeKeys(conn, "2017-Jun-06", "Peter Doe", "Lock 3", 8)
 
 	return conn
 }
@@ -141,23 +148,23 @@ func InsertStaticKey(conn *sql.DB, name string, lockalias string) {
 	return key
 }*/
 
-func RegisterUser(conn *sql.DB, name string, email string, password string) int {
+func RegisterUser(conn *sql.DB, name string, password string) int {
 
-	return InsertUser(conn, name, email, password)
+	return InsertUser(conn, name, password)
 }
 
 // Insertion methods /////////
-func InsertUser(conn *sql.DB, name string, email string, password string) int {
+func InsertUser(conn *sql.DB, name string, password string) int {
 
 	tx, err := conn.Begin()
 	CheckErr(err)
 
-	stmt, err := conn.Prepare(INSERT_USER)
+	stmt, err := conn.Prepare("insert into Users (username, password) values (?,?)")
 	CheckErr(err)
 
 	defer stmt.Close()
 
-	_, err = tx.Stmt(stmt).Exec(name, email, password)
+	_, err = stmt.Exec(name, password)
 	CheckErr(err)
 
 	err = tx.Commit()
@@ -182,7 +189,7 @@ func InsertAdmin(conn *sql.DB, username string, password string, lockalias strin
 		return -1
 	}
 
-	userid = InsertUser(conn, username, "", password)
+	userid = InsertUser(conn, username, password)
 	lockid := SearchLock(conn, lockalias)
 
 	if userid != -1 && lockid != -1 {
@@ -232,7 +239,7 @@ func InsertUserLock(conn *sql.DB, userid int, lockid int, usertype string) (user
 	return userlockid
 }
 
-func InsertLock(conn *sql.DB, alias string) int {
+func InsertLock(conn *sql.DB, lockalias string) int {
 
 	masterkey := ""
 	maintenancekey := ""
@@ -253,36 +260,13 @@ func InsertLock(conn *sql.DB, alias string) int {
 	CheckErr(err)
 
 	defer stmt.Close()
-	_, err = tx.Stmt(stmt).Exec(alias, masterkey, maintenancekey)
+	_, err = tx.Stmt(stmt).Exec(lockalias, masterkey, maintenancekey)
 	CheckErr(err)
 
 	err = tx.Commit()
 	CheckErr(err)
 
-	lockid := SearchLock(conn, alias)
-
-	/*
-		if providerName != "" {
-
-			providerid := FindProvider(conn, providerName)
-
-			typeid := SearchUserType(conn, "Provider")
-
-			if typeid != -1 {
-
-				userlockid := InsertUserLock(conn, providerid, lockid, "Provider")
-
-				if userlockid == -1 {
-
-					fmt.Println("Invalid userlockid after insertion")
-				}
-
-			} else {
-
-				fmt.Errorf("Invalid type ID on InsertLock")
-			}
-
-		}*/
+	lockid := SearchLock(conn, lockalias)
 
 	fmt.Println("insert lock ", lockid)
 	return lockid
@@ -343,30 +327,11 @@ func AssignLockToUser(conn *sql.DB, username string, lockalias string, isAdmin b
 	}
 }
 
-/*func AssignLockToUser(conn *sql.DB, username string, lockalias string) {
-
-	userid := SearchUser(conn, username)
-	lockid := SearchLock(conn, lockalias)
-	typeid := SearchUserType(conn, "Client")
-
-	tx, err := conn.Begin()
-	CheckErr(err)
-
-	stmt, err := conn.Prepare("Insert into UserLock(userid, lockid, typeid) values(?,?,?)")
-	CheckErr(err)
-
-	defer stmt.Close()
-	_, err = tx.Stmt(stmt).Exec(userid, lockid, typeid)
-	CheckErr(err)
-
-	err = tx.Commit()
-	CheckErr(err)
-}*/
-
 // Querie / Getters
 func SearchUser(conn *sql.DB, username string) int {
 
 	rows, err := conn.Query("select id from Users where username=?", username)
+
 	defer rows.Close()
 
 	var userid = -1

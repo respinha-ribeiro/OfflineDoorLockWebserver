@@ -1,8 +1,7 @@
 CREATE TABLE  Users  (
 	 id  integer NOT NULL PRIMARY KEY AUTOINCREMENT,
 	 username 	text NOT NULL,
-	 password text NOT NULL,
-	 email 	text 
+	 password text NOT NULL
 );
 
 CREATE TABLE Locks (
