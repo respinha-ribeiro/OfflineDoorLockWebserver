@@ -78,11 +78,11 @@ func InitConn() *sql.DB {
 	AssignLockToUser(conn, "Peter Doe", "Lock 3", true)
 	AssignLockToUser(conn, "John Doe", "Lock 3", false)
 
-	ComputeKeys(conn, "2017-Jun-06", "John Doe", "Lock 1", 8)
-	ComputeKeys(conn, "2017-Jun-06", "John Doe", "Lock 2", 8)
-	ComputeKeys(conn, "2017-Jun-06", "Peter Doe", "Lock 1", 8)
-	ComputeKeys(conn, "2017-Jun-06", "John Doe", "Lock 3", 8)
-	ComputeKeys(conn, "2017-Jun-06", "Peter Doe", "Lock 3", 8)
+	ComputeKeys(conn, "2017-Jun-11", "John Doe", "Lock 1", 8)
+	ComputeKeys(conn, "2017-Jun-11", "John Doe", "Lock 2", 8)
+	ComputeKeys(conn, "2017-Jun-11", "Peter Doe", "Lock 1", 8)
+	ComputeKeys(conn, "2017-Jun-11", "John Doe", "Lock 3", 8)
+	ComputeKeys(conn, "2017-Jun-11", "Peter Doe", "Lock 3", 8)
 
 	return conn
 }
