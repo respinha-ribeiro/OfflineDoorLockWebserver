@@ -55,25 +55,15 @@ func main() {
 
 	http.HandleFunc("/hello", hello)
 	http.HandleFunc("/login", Login)
-	http.HandleFunc("/req_keys", RequestKeys)
+	http.HandleFunc("/provide_keys", ProvideKeys)
 	http.HandleFunc("/update_master_key", UpdateMasterkey)
-
-	/*http.HandleFunc("/register_user", RegisterUser)*/
-
-	//http.HandleFunc("/submit_logs", SubmitLogs)
 
 	fmt.Println("Listening on port 8000...")
 	// err := http.ListenAndServeTLS(":8000", "server.crt", "server.key", nil)
 
-	/*rfid_db.ComputeKeys(conn, "2017-May-31", "John Doe", "lock 1", 5)
-	rfid_db.ComputeKeys(conn, "2017-Aug-04", "John Doe", "lock 1", 7)
-	fmt.Println(rfid_db.GetUpdatedKeys(conn, "John Doe"))*/
-
 	err := http.ListenAndServe(":8000", nil)
 	if err != nil {
-		//log.Fatal("ListenAndServe: ", err)
-		fmt.Println("ERROR")
-		fmt.Println(err)
+		panic(err)
 	}
 }
 
@@ -116,7 +106,7 @@ func basicAuth(w http.ResponseWriter, r *http.Request) bool {
 
 }
 
-func RequestKeys(w http.ResponseWriter, r *http.Request) {
+func ProvideKeys(w http.ResponseWriter, r *http.Request) {
 
 	if !basicAuth(w, r) {
 
@@ -139,8 +129,6 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 	duration := req.Duration
 	lockalias := req.Lockalias
 
-	// staticKey := rfid_db.GetStaticKey(conn, username, lockalias)
-
 	fmt.Println("Requested for ", start, "with", duration)
 
 	dates, keys, userHash := rfid_db.ComputeKeys(conn, start, username, lockalias, duration)
@@ -157,8 +145,6 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 
 	if size > duration {
 
-		// twice the amount
-		// client and admin keys
 		for i := 0; i < size/2; i++ {
 			roles[i] = false
 		}
@@ -190,9 +176,6 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 		dateIdx++
 	}
 
-	// static := UserKeys{Admin: true, Date: "2015-11-10", Key: staticKey}
-	// jsonElem = append(jsonElem, static)
-
 	fmt.Println("Done!")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jsonElem)
@@ -201,42 +184,6 @@ func RequestKeys(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(len([]byte(userHashB64)))
 	w.Write([]byte(userHashB64))
 }
-
-/*func GetUpdatedKeys(w http.ResponseWriter, r *http.Request) {
-
-	if !basicAuth(w, r) {
-
-		w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
-		w.WriteHeader(401)
-		w.Write([]byte("401 Unauthorized\n"))
-		return
-	}
-
-	decoder := json.NewDecoder(r.Body)
-
-	req := User{}
-	err := decoder.Decode(&req)
-	if err != nil {
-		panic(err)
-	}
-
-	username := req.User
-
-	fmt.Println("User ", username)
-
-	keys := rfid_db.GetUpdatedKeys(conn, username)
-
-	// jsonElem := make([]LockKeyDates, len(keys))
-
-	jsonString, err := json.Marshal(keys)
-	if err != nil {
-		panic(err)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jsonString)
-
-}*/
 
 func Login(w http.ResponseWriter, r *http.Request) {
 
@@ -256,19 +203,10 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
-	// admin := req.Admin
 	user := req.User
 
 	fmt.Println("User is", user)
 	keys := rfid_db.GetUpdatedKeys(conn, user)
-
-	/*jsonString, err := json.Marshal(keys)
-	if err != nil {
-
-		panic(err)
-	}*/
-
-	// w.Header().Set("Content-Type", "application/json")
 
 	userid := rfid_db.SearchUser(conn, user)
 	w.Write([]byte(strconv.Itoa(userid)))
@@ -295,52 +233,6 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	rfid_db.RegisterUser(conn, name, pass)
 }
 
-func SubmitLogs(w http.ResponseWriter, r *http.Request) {
-
-	if !basicAuth(w, r) {
-
-		w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
-		w.WriteHeader(401)
-		w.Write([]byte("401 Unauthorized\n"))
-		return
-	}
-
-	err := r.ParseForm()
-	if err != nil {
-
-		panic(err)
-	}
-
-	username := r.Form.Get("User")
-	lockalias := r.Form.Get("Lock")
-	logs := r.Form.Get("Logs")
-
-	if !rfid_db.IsAdmin(conn, username, lockalias) {
-
-		w.Header().Set("WWW-Authenticate", `Basic realm="MY REALM"`)
-		w.WriteHeader(401)
-		w.Write([]byte("User has no admin privileges or lock doesn't exist\n"))
-		return
-	}
-
-	f, err := ioutil.TempFile("", "file.log")
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = f.Write([]byte(logs))
-	if err != nil {
-		panic(err)
-	}
-
-	err = f.Close()
-	if err != nil {
-
-		panic(err)
-	}
-
-	// TODO: test
-}
 
 func UpdateMasterkey(w http.ResponseWriter, r *http.Request) {
 
