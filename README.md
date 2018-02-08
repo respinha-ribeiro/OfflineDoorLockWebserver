@@ -6,3 +6,5 @@ A user could interact with the door lock - an NFC-enabled embedded system which 
 The system was enhanced to provide role-based access control and maintenance operations without any network connection on the doorlock. 
 
 This resulted in [an article](http://wiki.ieeta.pt/wiki/index.php/Azevedo-2017a) for the portuguese national conference [INForum](http://inforum.org.pt/INForum2017).
+
+The solution for both this webserver, the Android app and the Arduino-based doorlock was designed by me and [mlaz](https://github.com/mlaz).
